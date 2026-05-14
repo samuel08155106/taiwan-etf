@@ -147,7 +147,10 @@ async function searchETF(){
       fetchYahooQuote(code),
       fetchTWSEHistory(code)
     ]);
-    if(!quote&&(!history||!history.data||history.data.length===0)){
+    // 只要任一來源有資料就顯示，不需要兩個都有
+    const hasQuote = quote && quote.meta;
+    const hasHistory = history && history.data && history.data.length > 0;
+    if(!hasQuote && !hasHistory){
       main.innerHTML=`<div class="status-box"><div class="icon">❌</div><p>找不到代號 <strong>${code}</strong> 的 ETF</p><p style="font-size:0.8rem;margin-top:8px;">請確認代號是否正確，例如 0050、00878</p></div>`;
       return;
     }
@@ -170,7 +173,8 @@ async function fetchYahooQuote(code){
       if(!r.ok)continue;
       const d=await r.json();
       const result=d?.chart?.result?.[0];
-      if(result&&result.meta&&result.meta.regularMarketPrice){
+      // 修正：用 != null 而非 truthy，避免價格為 0 時誤判
+      if(result && result.meta && result.meta.regularMarketPrice != null){
         result._suffix=suffix;
         return result;
       }
@@ -232,14 +236,17 @@ async function renderAll(code,quote,history){
   const main=document.getElementById('main');
   const meta=quote?.meta||{};
 
-  const price=meta.regularMarketPrice||0;
-  const prevClose=meta.chartPreviousClose||meta.previousClose||0;
+  // 從 Yahoo Finance 取價格，若無則從 TWSE history 補
+  const histLast = history?.data?.[history.data.length-1];
+  const price = meta.regularMarketPrice ?? (histLast ? parseFloat(histLast[6].replace(/,/g,'')) : 0);
+  const prevClose = meta.chartPreviousClose || meta.previousClose ||
+    (histLast ? parseFloat(histLast[6].replace(/,/g,'')) - parseFloat((histLast[7]||'0').replace(/,/g,'').replace('X','')) : 0);
   const change=price-prevClose;
   const changePct=prevClose?(change/prevClose*100):0;
-  const high=meta.regularMarketDayHigh||0;
-  const low=meta.regularMarketDayLow||0;
-  const open=meta.regularMarketOpen||0;
-  const volume=meta.regularMarketVolume||0;
+  const high = meta.regularMarketDayHigh || (histLast ? parseFloat(histLast[4].replace(/,/g,'')) : 0);
+  const low  = meta.regularMarketDayLow  || (histLast ? parseFloat(histLast[5].replace(/,/g,'')) : 0);
+  const open = meta.regularMarketOpen    || (histLast ? parseFloat(histLast[3].replace(/,/g,'')) : 0);
+  const volume = meta.regularMarketVolume || (histLast ? parseInt(histLast[1].replace(/,/g,'')) : 0);
   const marketCap=meta.marketCap||0;
   const fiftyTwoHigh=meta.fiftyTwoWeekHigh||0;
   const fiftyTwoLow=meta.fiftyTwoWeekLow||0;
