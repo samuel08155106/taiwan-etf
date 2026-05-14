@@ -211,49 +211,48 @@ async function searchETF() {
 
 // ── 抓取股價資料（TWSE） ──────────────────────────────
 async function fetchPrice(code) {
-  // TWSE 即時行情 API
-  const today = new Date();
-  const dateStr = today.getFullYear().toString() +
-    String(today.getMonth()+1).padStart(2,'0') +
-    String(today.getDate()).padStart(2,'0');
+  // TWSE 即時行情 API（使用 CORS proxy）
+  const proxy = 'https://api.allorigins.win/raw?url=';
 
-  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${code}.tw&json=1&delay=0`;
-
-  try {
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data.msgArray || data.msgArray.length === 0) return null;
-    return data.msgArray[0];
-  } catch(e) {
-    // fallback: 用 TWSE 歷史資料
-    return await fetchPriceFallback(code);
+  // 先試上市(tse)，再試上櫃(otc)
+  for (const market of ['tse', 'otc']) {
+    try {
+      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${market}_${code}.tw&json=1&delay=0`;
+      const res = await fetch(proxy + encodeURIComponent(url));
+      const data = await res.json();
+      if (data.msgArray && data.msgArray.length > 0 && data.msgArray[0].z !== '-') {
+        data.msgArray[0]._market = market;
+        return data.msgArray[0];
+      }
+    } catch(e) {}
   }
+  // fallback: 用 TWSE 歷史資料
+  return await fetchPriceFallback(code);
 }
 
 async function fetchPriceFallback(code) {
-  const today = new Date();
-  const dateStr = today.getFullYear().toString() +
-    String(today.getMonth()+1).padStart(2,'0') +
-    String(today.getDate()).padStart(2,'0');
+  const proxy = 'https://api.allorigins.win/raw?url=';
   const url = `https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=${code}&response=json`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(proxy + encodeURIComponent(url));
     const data = await res.json();
     if (data.stat !== 'OK' || !data.data || data.data.length === 0) return null;
-    // 取最後一筆
     const last = data.data[data.data.length - 1];
     // [日期, 成交股數, 成交金額, 開盤, 最高, 最低, 收盤, 漲跌, 成交筆數]
+    const closePrice = parseFloat(last[6].replace(/,/g,''));
+    const changeStr = last[7].replace(/,/g,'');
+    const changeVal = parseFloat(changeStr.replace('X','')) || 0;
     return {
       _fallback: true,
-      n: data.title ? data.title.replace('個股日成交資訊', '').trim() : code,
-      z: last[6].replace(',',''),
-      y: (parseFloat(last[6].replace(',','')) - parseFloat(last[7].replace(',','').replace('+',''))).toFixed(2),
-      u: last[4].replace(',',''),
-      w: last[5].replace(',',''),
-      o: last[3].replace(',',''),
-      v: last[1].replace(',',''),
+      n: data.title ? data.title.replace(/個股日成交資訊|每日收盤行情/g,'').trim() : code,
+      z: last[6].replace(/,/g,''),
+      y: (closePrice - changeVal).toFixed(2),
+      u: last[4].replace(/,/g,''),
+      w: last[5].replace(/,/g,''),
+      o: last[3].replace(/,/g,''),
+      v: last[1].replace(/,/g,''),
       d: last[0],
-      change: last[7],
+      change: changeStr,
       _allData: data.data
     };
   } catch(e) {
@@ -263,9 +262,10 @@ async function fetchPriceFallback(code) {
 
 // ── 抓取 ETF 基本資訊（TWSE ETF 清單） ───────────────
 async function fetchETFInfo(code) {
+  const proxy = 'https://api.allorigins.win/raw?url=';
   try {
     const url = `https://www.twse.com.tw/rwd/zh/ETF/etfInfo?stockNo=${code}&response=json`;
-    const res = await fetch(url);
+    const res = await fetch(proxy + encodeURIComponent(url));
     const data = await res.json();
     return data;
   } catch(e) {
@@ -275,11 +275,30 @@ async function fetchETFInfo(code) {
 
 // ── 抓取持股明細（TWSE ETF 成分股） ──────────────────
 async function fetchHoldings(code) {
+  const proxy = 'https://api.allorigins.win/raw?url=';
   try {
-    // TWSE ETF 成分股 API
+    // 先試 TWSE ETF 成分股 API
     const url = `https://www.twse.com.tw/rwd/zh/ETF/etfConstituentStocks?stockNo=${code}&response=json`;
-    const res = await fetch(url);
-    const data = await res.json();
+    const res = await fetch(proxy + encodeURIComponent(url));
+    const text = await res.text();
+    if (!text || text.trim() === '') throw new Error('empty');
+    const data = JSON.parse(text);
+    if (data.stat === 'OK' && data.data && data.data.length > 0) return data;
+    throw new Error('no data');
+  } catch(e) {
+    // fallback: 嘗試 TWSE 另一個持股 API
+    return await fetchHoldingsFallback(code);
+  }
+}
+
+async function fetchHoldingsFallback(code) {
+  const proxy = 'https://api.allorigins.win/raw?url=';
+  try {
+    const url = `https://www.twse.com.tw/fund/TWT38U?response=json&stockNo=${code}`;
+    const res = await fetch(proxy + encodeURIComponent(url));
+    const text = await res.text();
+    if (!text || text.trim() === '') return null;
+    const data = JSON.parse(text);
     return data;
   } catch(e) {
     return null;
@@ -288,10 +307,13 @@ async function fetchHoldings(code) {
 
 // ── 抓取 ETF 申購贖回（進出） ─────────────────────────
 async function fetchCreationRedemption(code) {
+  const proxy = 'https://api.allorigins.win/raw?url=';
   try {
     const url = `https://www.twse.com.tw/rwd/zh/ETF/etfCreationRedemption?stockNo=${code}&response=json`;
-    const res = await fetch(url);
-    const data = await res.json();
+    const res = await fetch(proxy + encodeURIComponent(url));
+    const text = await res.text();
+    if (!text || text.trim() === '') return null;
+    const data = JSON.parse(text);
     return data;
   } catch(e) {
     return null;
