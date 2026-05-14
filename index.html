@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>台灣 ETF 查詢系統</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --border: #334155;
+    --blue: #3b82f6;
+    --blue-light: #60a5fa;
+    --green: #22c55e;
+    --red: #ef4444;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #1e3a5f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* Header */
+  header { background: linear-gradient(135deg, #1e3a5f, #0f2744); padding: 20px 16px 16px; border-bottom: 2px solid var(--blue); }
+  header h1 { font-size: 1.5rem; color: var(--blue-light); text-align: center; }
+  header p { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+
+  /* Search */
+  .search-wrap { padding: 16px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+  .search-row { display: flex; gap: 8px; max-width: 600px; margin: 0 auto; }
+  .search-row input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; color: var(--text); font-size: 1rem; outline: none; transition: border-color 0.2s; }
+  .search-row input:focus { border-color: var(--blue); }
+  .search-row input::placeholder { color: var(--muted); }
+  .search-row button { background: var(--blue); color: white; border: none; border-radius: 10px; padding: 12px 20px; font-size: 0.95rem; cursor: pointer; white-space: nowrap; transition: background 0.2s; }
+  .search-row button:hover { background: #2563eb; }
+  .search-row button:disabled { background: var(--border); cursor: not-allowed; }
+  .popular-tags { display: flex; flex-wrap: wrap; gap: 6px; max-width: 600px; margin: 10px auto 0; }
+  .tag { background: var(--accent); color: var(--blue-light); border: 1px solid var(--blue); border-radius: 20px; padding: 4px 12px; font-size: 0.78rem; cursor: pointer; transition: all 0.2s; }
+  .tag:hover { background: var(--blue); color: white; }
+
+  /* Main */
+  main { max-width: 900px; margin: 0 auto; padding: 16px; }
+
+  /* Loading / Error */
+  .status-box { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .status-box .icon { font-size: 3rem; margin-bottom: 12px; }
+  .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ETF Card */
+  .etf-header { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 14px; }
+  .etf-title-row { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .etf-code { font-size: 1.8rem; font-weight: bold; color: var(--blue-light); }
+  .etf-name { font-size: 1rem; color: var(--muted); margin-top: 2px; }
+  .price-block { text-align: right; }
+  .price-now { font-size: 2rem; font-weight: bold; }
+  .price-change { font-size: 0.9rem; margin-top: 2px; }
+  .up { color: var(--red); }
+  .down { color: var(--green); }
+  .flat { color: var(--muted); }
+
+  /* Stats Grid */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .stat-card .label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; }
+  .stat-card .value { font-size: 1.1rem; font-weight: bold; color: var(--text); }
+  .stat-card .value.up { color: var(--red); }
+  .stat-card .value.down { color: var(--green); }
+
+  /* Section */
+  .section { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .section h3 { font-size: 1rem; color: var(--blue-light); margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+  .section h3 .badge { background: var(--accent); color: var(--blue-light); border-radius: 20px; padding: 2px 10px; font-size: 0.75rem; }
+
+  /* Holdings Table */
+  .holdings-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .holdings-table th { color: var(--muted); font-weight: normal; padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+  .holdings-table td { padding: 8px 8px; border-bottom: 1px solid #1e293b; }
+  .holdings-table tr:last-child td { border-bottom: none; }
+  .holdings-table tr:hover td { background: #263548; }
+  .bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .bar { height: 6px; background: var(--blue); border-radius: 3px; min-width: 2px; }
+  .pct-text { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+
+  /* Change List */
+  .change-list { display: flex; flex-direction: column; gap: 8px; }
+  .change-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border); }
+  .change-item .stock-info { display: flex; flex-direction: column; }
+  .change-item .stock-code { font-weight: bold; font-size: 0.9rem; }
+  .change-item .stock-name { font-size: 0.78rem; color: var(--muted); }
+  .change-item .change-val { font-weight: bold; font-size: 0.9rem; }
+  .add-badge { background: #1c2f1c; color: var(--green); border: 1px solid var(--green); border-radius: 6px; padding: 2px 8px; font-size: 0.75rem; margin-right: 8px; }
+  .remove-badge { background: #2f1c1c; color: var(--red); border: 1px solid var(--red); border-radius: 6px; padding: 2px 8px; font-size: 0.75rem; margin-right: 8px; }
+
+  /* Note */
+  .note { background: #1c2a1c; border: 1px solid #22c55e44; border-radius: 8px; padding: 10px 14px; font-size: 0.78rem; color: #86efac; margin-bottom: 14px; }
+  .warn-note { background: #2a1c1c; border: 1px solid #ef444444; border-radius: 8px; padding: 10px 14px; font-size: 0.78rem; color: #fca5a5; margin-bottom: 14px; }
+
+  /* Footer */
+  footer { text-align: center; padding: 20px; color: var(--muted); font-size: 0.75rem; border-top: 1px solid var(--border); margin-top: 20px; }
+  footer a { color: var(--blue-light); }
+
+  /* Responsive */
+  @media (max-width: 480px) {
+    .etf-code { font-size: 1.4rem; }
+    .price-now { font-size: 1.6rem; }
+    .holdings-table { font-size: 0.78rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🇹🇼 台灣 ETF 查詢系統</h1>
+  <p>資料來源：證交所 TWSE ｜ 每日更新</p>
+</header>
+
+<div class="search-wrap">
+  <div class="search-row">
+    <input type="text" id="searchInput" placeholder="輸入 ETF 代號，例如 0050" maxlength="10" />
+    <button id="searchBtn" onclick="searchETF()">查詢</button>
+  </div>
+  <div class="popular-tags">
+    <span class="tag" onclick="quickSearch('0050')">0050 元大台灣50</span>
+    <span class="tag" onclick="quickSearch('0056')">0056 元大高股息</span>
+    <span class="tag" onclick="quickSearch('00878')">00878 國泰永續高股息</span>
+    <span class="tag" onclick="quickSearch('00919')">00919 群益台灣精選高息</span>
+    <span class="tag" onclick="quickSearch('006208')">006208 富邦台50</span>
+    <span class="tag" onclick="quickSearch('00929')">00929 復華台灣科技優息</span>
+  </div>
+</div>
+
+<main id="main">
+  <div class="status-box">
+    <div class="icon">🔍</div>
+    <p>輸入 ETF 代號開始查詢</p>
+    <p style="font-size:0.8rem; margin-top:8px;">支援台灣上市 ETF，例如 0050、0056、00878</p>
+  </div>
+</main>
+
+<footer>
+  資料來源：<a href="https://www.twse.com.tw" target="_blank">台灣證券交易所 TWSE</a> ｜
+  持股資料：<a href="https://www.sitca.org.tw" target="_blank">投信投顧公會</a><br>
+  本工具僅供參考，不構成投資建議。
+</footer>
+
+<script>
+// ── 工具函式 ──────────────────────────────────────────
+function fmt(n, dec=2) {
+  if (n == null || isNaN(n)) return '—';
+  return Number(n).toLocaleString('zh-TW', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+function fmtB(n) {
+  if (n == null || isNaN(n)) return '—';
+  const v = Number(n);
+  if (v >= 1e8) return (v/1e8).toFixed(2) + ' 億';
+  if (v >= 1e4) return (v/1e4).toFixed(2) + ' 萬';
+  return v.toLocaleString();
+}
+function updown(v) {
+  if (v > 0) return 'up';
+  if (v < 0) return 'down';
+  return 'flat';
+}
+function updownSign(v) {
+  if (v > 0) return '▲ +' + fmt(v);
+  if (v < 0) return '▼ ' + fmt(v);
+  return '— ' + fmt(v);
+}
+
+// ── 快速搜尋 ──────────────────────────────────────────
+function quickSearch(code) {
+  document.getElementById('searchInput').value = code;
+  searchETF();
+}
+
+// Enter 鍵觸發
+document.getElementById('searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchETF();
+});
+
+// ── 主查詢函式 ────────────────────────────────────────
+async function searchETF() {
+  const raw = document.getElementById('searchInput').value.trim().toUpperCase();
+  if (!raw) return;
+  const code = raw;
+
+  const main = document.getElementById('main');
+  main.innerHTML = `<div class="status-box"><div class="spinner"></div><p>查詢中，請稍候…</p></div>`;
+  document.getElementById('searchBtn').disabled = true;
+
+  try {
+    // 並行抓取多個資料
+    const [priceData, etfInfo] = await Promise.all([
+      fetchPrice(code),
+      fetchETFInfo(code)
+    ]);
+
+    if (!priceData) {
+      main.innerHTML = `<div class="status-box"><div class="icon">❌</div><p>找不到代號 <strong>${code}</strong> 的 ETF</p><p style="font-size:0.8rem;margin-top:8px;">請確認代號是否正確，例如 0050、00878</p></div>`;
+      return;
+    }
+
+    renderResult(code, priceData, etfInfo);
+  } catch(e) {
+    main.innerHTML = `<div class="status-box"><div class="icon">⚠️</div><p>查詢失敗，請稍後再試</p><p style="font-size:0.8rem;margin-top:8px;">${e.message}</p></div>`;
+  } finally {
+    document.getElementById('searchBtn').disabled = false;
+  }
+}
+
+// ── 抓取股價資料（TWSE） ──────────────────────────────
+async function fetchPrice(code) {
+  // TWSE 即時行情 API
+  const today = new Date();
+  const dateStr = today.getFullYear().toString() +
+    String(today.getMonth()+1).padStart(2,'0') +
+    String(today.getDate()).padStart(2,'0');
+
+  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${code}.tw&json=1&delay=0`;
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.msgArray || data.msgArray.length === 0) return null;
+    return data.msgArray[0];
+  } catch(e) {
+    // fallback: 用 TWSE 歷史資料
+    return await fetchPriceFallback(code);
+  }
+}
+
+async function fetchPriceFallback(code) {
+  const today = new Date();
+  const dateStr = today.getFullYear().toString() +
+    String(today.getMonth()+1).padStart(2,'0') +
+    String(today.getDate()).padStart(2,'0');
+  const url = `https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?stockNo=${code}&response=json`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.stat !== 'OK' || !data.data || data.data.length === 0) return null;
+    // 取最後一筆
+    const last = data.data[data.data.length - 1];
+    // [日期, 成交股數, 成交金額, 開盤, 最高, 最低, 收盤, 漲跌, 成交筆數]
+    return {
+      _fallback: true,
+      n: data.title ? data.title.replace('個股日成交資訊', '').trim() : code,
+      z: last[6].replace(',',''),
+      y: (parseFloat(last[6].replace(',','')) - parseFloat(last[7].replace(',','').replace('+',''))).toFixed(2),
+      u: last[4].replace(',',''),
+      w: last[5].replace(',',''),
+      o: last[3].replace(',',''),
+      v: last[1].replace(',',''),
+      d: last[0],
+      change: last[7],
+      _allData: data.data
+    };
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── 抓取 ETF 基本資訊（TWSE ETF 清單） ───────────────
+async function fetchETFInfo(code) {
+  try {
+    const url = `https://www.twse.com.tw/rwd/zh/ETF/etfInfo?stockNo=${code}&response=json`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data;
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── 抓取持股明細（TWSE ETF 成分股） ──────────────────
+async function fetchHoldings(code) {
+  try {
+    // TWSE ETF 成分股 API
+    const url = `https://www.twse.com.tw/rwd/zh/ETF/etfConstituentStocks?stockNo=${code}&response=json`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data;
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── 抓取 ETF 申購贖回（進出） ─────────────────────────
+async function fetchCreationRedemption(code) {
+  try {
+    const url = `https://www.twse.com.tw/rwd/zh/ETF/etfCreationRedemption?stockNo=${code}&response=json`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data;
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── 渲染結果 ──────────────────────────────────────────
+async function renderResult(code, priceData, etfInfo) {
+  const main = document.getElementById('main');
+
+  // 解析價格
+  let price, prevClose, change, changePct, high, low, open, volume, name, date;
+  if (priceData._fallback) {
+    price = parseFloat(priceData.z) || 0;
+    prevClose = parseFloat(priceData.y) || 0;
+    change = parseFloat(priceData.change) || 0;
+    changePct = prevClose ? (change / prevClose * 100) : 0;
+    high = parseFloat(priceData.u) || 0;
+    low = parseFloat(priceData.w) || 0;
+    open = parseFloat(priceData.o) || 0;
+    volume = parseInt(priceData.v.replace(/,/g,'')) || 0;
+    name = priceData.n || code;
+    date = priceData.d;
+  } else {
+    price = parseFloat(priceData.z) || parseFloat(priceData.y) || 0;
+    prevClose = parseFloat(priceData.y) || 0;
+    change = price - prevClose;
+    changePct = prevClose ? (change / prevClose * 100) : 0;
+    high = parseFloat(priceData.h) || 0;
+    low = parseFloat(priceData.l) || 0;
+    open = parseFloat(priceData.o) || 0;
+    volume = parseInt((priceData.v||'0').replace(/,/g,'')) || 0;
+    name = priceData.n || code;
+    date = priceData.d || '';
+  }
+
+  const cls = updown(change);
+
+  // 先渲染基本框架
+  main.innerHTML = `
+    <div class="note">📡 資料來源：台灣證券交易所（TWSE）｜ 股價資料更新至最近交易日</div>
+
+    <div class="etf-header">
+      <div class="etf-title-row">
+        <div>
+          <div class="etf-code">${code}</div>
+          <div class="etf-name">${name}</div>
+          ${date ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">資料日期：${date}</div>` : ''}
+        </div>
+        <div class="price-block">
+          <div class="price-now ${cls}">${fmt(price)}</div>
+          <div class="price-change ${cls}">${updownSign(change)} (${change>=0?'+':''}${fmt(changePct)}%)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="label">昨日收盤</div>
+        <div class="value">${fmt(prevClose)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">今日開盤</div>
+        <div class="value">${fmt(open)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">今日最高</div>
+        <div class="value up">${fmt(high)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">今日最低</div>
+        <div class="value down">${fmt(low)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">成交量（股）</div>
+        <div class="value">${fmtB(volume)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">成交量（張）</div>
+        <div class="value">${fmtB(Math.floor(volume/1000))}</div>
+      </div>
+    </div>
+
+    <div id="etfInfoSection"></div>
+    <div id="holdingsSection"><div class="section"><h3>📦 持股明細</h3><div class="spinner" style="margin:20px auto;"></div></div></div>
+    <div id="crSection"><div class="section"><h3>🔄 今日申購贖回（進出）</h3><div class="spinner" style="margin:20px auto;"></div></div></div>
+  `;
+
+  // 並行抓取持股和申購贖回
+  const [holdings, cr] = await Promise.all([
+    fetchHoldings(code),
+    fetchCreationRedemption(code)
+  ]);
+
+  renderETFInfo(etfInfo, code);
+  renderHoldings(holdings, code);
+  renderCR(cr, code);
+}
+
+// ── 渲染 ETF 基本資訊 ─────────────────────────────────
+function renderETFInfo(data, code) {
+  const el = document.getElementById('etfInfoSection');
+  if (!data || data.stat !== 'OK' || !data.data || data.data.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+
+  // TWSE etfInfo 欄位：[基金名稱, 上市日期, 追蹤指數, 管理費, 保管費, 基金規模, 受益人數, ...]
+  const fields = data.fields || [];
+  const row = data.data[0];
+
+  let html = `<div class="section"><h3>📋 ETF 基本資訊</h3><div class="stats-grid">`;
+  fields.forEach((f, i) => {
+    if (row[i] && row[i] !== '-') {
+      html += `<div class="stat-card"><div class="label">${f}</div><div class="value" style="font-size:0.9rem;">${row[i]}</div></div>`;
+    }
+  });
+  html += `</div></div>`;
+  el.innerHTML = html;
+}
+
+// ── 渲染持股明細 ──────────────────────────────────────
+function renderHoldings(data, code) {
+  const el = document.getElementById('holdingsSection');
+
+  if (!data || data.stat !== 'OK' || !data.data || data.data.length === 0) {
+    el.innerHTML = `
+      <div class="section">
+        <h3>📦 持股明細</h3>
+        <div class="warn-note">⚠️ 持股明細資料暫無法取得。TWSE 持股資料通常於月底或季底更新，或該 ETF 尚未公布。</div>
+      </div>`;
+    return;
+  }
+
+  const fields = data.fields || [];
+  const rows = data.data;
+
+  // 找出佔比欄位
+  const pctIdx = fields.findIndex(f => f.includes('比') || f.includes('權重') || f.includes('%'));
+  const nameIdx = fields.findIndex(f => f.includes('名稱') || f.includes('股票名稱'));
+  const codeIdx = fields.findIndex(f => f.includes('代號') || f.includes('股票代號'));
+
+  // 計算最大佔比（用於 bar 寬度）
+  let maxPct = 0;
+  if (pctIdx >= 0) {
+    rows.forEach(r => {
+      const v = parseFloat(r[pctIdx]);
+      if (v > maxPct) maxPct = v;
+    });
+  }
+
+  let html = `
+    <div class="section">
+      <h3>📦 持股明細 <span class="badge">${rows.length} 檔</span></h3>
+      <div style="overflow-x:auto;">
+      <table class="holdings-table">
+        <thead><tr>`;
+
+  fields.forEach(f => { html += `<th>${f}</th>`; });
+  html += `</tr></thead><tbody>`;
+
+  rows.forEach(r => {
+    html += `<tr>`;
+    r.forEach((cell, i) => {
+      if (i === pctIdx && maxPct > 0) {
+        const pct = parseFloat(cell) || 0;
+        const barW = Math.max(2, (pct / maxPct) * 80);
+        html += `<td><div class="bar-wrap"><div class="bar" style="width:${barW}px"></div><span class="pct-text">${cell}%</span></div></td>`;
+      } else {
+        html += `<td>${cell}</td>`;
+      }
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table></div></div>`;
+  el.innerHTML = html;
+}
+
+// ── 渲染申購贖回（進出） ──────────────────────────────
+function renderCR(data, code) {
+  const el = document.getElementById('crSection');
+
+  if (!data || data.stat !== 'OK' || !data.data || data.data.length === 0) {
+    el.innerHTML = `
+      <div class="section">
+        <h3>🔄 今日申購贖回（進出）</h3>
+        <div class="warn-note">⚠️ 申購贖回資料暫無法取得。此資料為 T+1 公布（前一交易日），非盤中即時資料。</div>
+      </div>`;
+    return;
+  }
+
+  const fields = data.fields || [];
+  const rows = data.data;
+
+  // 嘗試找出增加/減少欄位
+  const addIdx = fields.findIndex(f => f.includes('申購') || f.includes('增加'));
+  const redIdx = fields.findIndex(f => f.includes('贖回') || f.includes('減少'));
+
+  let html = `
+    <div class="section">
+      <h3>🔄 申購贖回明細 <span class="badge">T+1 資料</span></h3>
+      <div class="note" style="margin-bottom:12px;">📌 此為前一交易日申購贖回資料，非盤中即時。</div>
+      <div style="overflow-x:auto;">
+      <table class="holdings-table">
+        <thead><tr>`;
+
+  fields.forEach(f => { html += `<th>${f}</th>`; });
+  html += `</tr></thead><tbody>`;
+
+  rows.forEach(r => {
+    html += `<tr>`;
+    r.forEach((cell, i) => {
+      const v = parseFloat(cell.replace(/,/g,''));
+      let style = '';
+      if (i === addIdx && v > 0) style = 'color:var(--red);font-weight:bold;';
+      if (i === redIdx && v > 0) style = 'color:var(--green);font-weight:bold;';
+      html += `<td style="${style}">${cell}</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table></div></div>`;
+  el.innerHTML = html;
+}
+
+// ── URL 參數自動查詢 ──────────────────────────────────
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code') || params.get('etf');
+  if (code) {
+    document.getElementById('searchInput').value = code;
+    searchETF();
+  }
+});
+</script>
+
+</body>
+</html>
