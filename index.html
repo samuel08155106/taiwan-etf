@@ -173,33 +173,35 @@ async function searchETF(){
   }
 }
 
-// ── Yahoo Finance 即時報價 ────────────────────────────
+// ── Yahoo Finance 即時報價（透過 CORS proxy）────────
 async function fetchYahooQuote(code){
-  const YF_HEADERS={'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'};
+  // 使用 allorigins.win CORS proxy
+  const PROXY = 'https://api.allorigins.win/raw?url=';
+  
   // 先試上市 .TW，再試上櫃 .TWO
   for(const suffix of['.TW','.TWO']){
     try{
-      const url=`https://query1.finance.yahoo.com/v8/finance/chart/${code}${suffix}?interval=1d&range=5d&includePrePost=false`;
-      console.log('[DEBUG] fetchYahooQuote trying:', url);
-      const r=await fetch(url,{headers:YF_HEADERS});
-      console.log('[DEBUG] fetchYahooQuote response status:', r.status);
-      if(!r.ok)continue;
-      const d=await r.json();
-      const result=d?.chart?.result?.[0];
-      console.log('[DEBUG] fetchYahooQuote result:', result);
-      console.log('[DEBUG] fetchYahooQuote meta:', result?.meta);
-      console.log('[DEBUG] fetchYahooQuote price:', result?.meta?.regularMarketPrice);
-      // 修正：用 != null 而非 truthy，避免價格為 0 時誤判
-      if(result && result.meta && result.meta.regularMarketPrice != null){
-        result._suffix=suffix;
-        console.log('[DEBUG] fetchYahooQuote SUCCESS, returning result');
+      const apiUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${code}${suffix}?interval=1d&range=5d&includePrePost=false`;
+      const url = PROXY + encodeURIComponent(apiUrl);
+      console.log('[DEBUG] fetchYahooQuote trying:', code + suffix);
+      const r = await fetch(url);
+      console.log('[DEBUG] response status:', r.status);
+      if(!r.ok) continue;
+      const d = await r.json();
+      const result = d?.chart?.result?.[0];
+      const price = result?.meta?.regularMarketPrice;
+      console.log('[DEBUG] price:', price);
+      
+      if(result && result.meta && price != null){
+        result._suffix = suffix;
+        console.log('[DEBUG] Yahoo SUCCESS');
         return result;
       }
     }catch(e){
-      console.log('[DEBUG] fetchYahooQuote error:', e);
+      console.log('[DEBUG] Yahoo error:', e.message);
     }
   }
-  console.log('[DEBUG] fetchYahooQuote FAILED, returning null');
+  console.log('[DEBUG] Yahoo FAILED');
   return null;
 }
 
@@ -215,40 +217,11 @@ async function fetchTWSEHistory(code){
   }catch(e){return null;}
 }
 
-// ── Yahoo Finance 持股（帶 crumb） ────────────────────
-let _yfCrumb=null;
-let _yfCookie=null;
-
-async function getYFCrumb(){
-  if(_yfCrumb)return _yfCrumb;
-  try{
-    // 取 crumb
-    const r=await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb',{
-      credentials:'include',
-      headers:{'User-Agent':'Mozilla/5.0'}
-    });
-    if(r.ok){
-      _yfCrumb=await r.text();
-      return _yfCrumb;
-    }
-  }catch(e){}
+// ── Yahoo Finance 持股（透過 CORS proxy）────────────
+async function fetchYahooHoldings(code, suffix){
+  // Yahoo Finance 持股 API 需要登入，透過 proxy 也無法繞過
+  // 直接返回 null，讓前端顯示 TWSE 連結
   return null;
-}
-
-async function fetchYahooHoldings(code,suffix){
-  try{
-    const crumb=await getYFCrumb();
-    const sym=code+(suffix||'.TW');
-    const crumbParam=crumb?`&crumb=${encodeURIComponent(crumb)}`:'';
-    const url=`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${sym}?modules=topHoldings${crumbParam}`;
-    const r=await fetch(url,{
-      credentials:'include',
-      headers:{'User-Agent':'Mozilla/5.0'}
-    });
-    if(!r.ok)return null;
-    const d=await r.json();
-    return d?.quoteSummary?.result?.[0]||null;
-  }catch(e){return null;}
 }
 
 // ── 渲染全部 ──────────────────────────────────────────
