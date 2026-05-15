@@ -217,11 +217,54 @@ async function fetchTWSEHistory(code){
   }catch(e){return null;}
 }
 
-// ── Yahoo Finance 持股（透過 CORS proxy）────────────
-async function fetchYahooHoldings(code, suffix){
-  // Yahoo Finance 持股 API 需要登入，透過 proxy 也無法繞過
-  // 直接返回 null，讓前端顯示 TWSE 連結
-  return null;
+// ── MoneyDJ 持股明細（透過 CORS proxy 抓 HTML）──────
+async function fetchMoneyDJHoldings(code){
+  try{
+    const PROXY = 'https://api.allorigins.win/raw?url=';
+    const url = `https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid=${code}.TW`;
+    console.log('[DEBUG] fetchMoneyDJ trying:', code);
+    
+    const r = await fetch(PROXY + encodeURIComponent(url));
+    if(!r.ok) return null;
+    
+    const html = await r.text();
+    
+    // 解析 HTML 取得持股資料
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    
+    // 找資料日期
+    const dateEl = doc.querySelector('#ctl00_ctl00_MainContent_MainContent_sdate3');
+    const dataDate = dateEl ? dateEl.textContent.replace('資料日期：','').trim() : '';
+    
+    // 找持股表格
+    const tables = doc.querySelectorAll('table.datalist');
+    if(!tables || tables.length === 0) return null;
+    
+    const holdings = [];
+    tables.forEach(table => {
+      const rows = table.querySelectorAll('tr');
+      rows.forEach((row, i) => {
+        if(i === 0) return; // skip header
+        const cells = row.querySelectorAll('td');
+        if(cells.length >= 4){
+          const name = cells[0].textContent.trim();
+          const shares = cells[1].textContent.trim();
+          const pct = parseFloat(cells[2].textContent.trim());
+          const change = cells[3].textContent.trim();
+          if(name && !isNaN(pct)){
+            holdings.push({name, shares, pct, change});
+          }
+        }
+      });
+    });
+    
+    console.log('[DEBUG] MoneyDJ holdings:', holdings.length);
+    return holdings.length > 0 ? {holdings, dataDate} : null;
+  }catch(e){
+    console.log('[DEBUG] MoneyDJ error:', e.message);
+    return null;
+  }
 }
 
 // ── 渲染全部 ──────────────────────────────────────────
@@ -294,7 +337,7 @@ async function renderAll(code,quote,history){
 
   // 並行：持股 + 歷史
   const [holdings]=await Promise.all([
-    fetchYahooHoldings(code,suffix),
+    fetchMoneyDJHoldings(code),
     Promise.resolve(renderHistory(history))
   ]);
   renderHoldings(holdings,code);
@@ -307,61 +350,48 @@ function renderHoldings(data,code){
     el.innerHTML=`
       <div class="section">
         <h3>📦 持股明細</h3>
-        <div class="warn-note">⚠️ 持股資料無法取得（Yahoo Finance 需要登入授權）。</div>
+        <div class="warn-note">⚠️ 持股資料無法取得（MoneyDJ 可能限流或該 ETF 無資料）。</div>
         <div class="info-note">
           📌 可至以下連結查詢完整持股：<br>
-          • <a href="https://www.twse.com.tw/zh/ETF/etf.html" target="_blank" style="color:var(--blue-light)">TWSE ETF 專區</a>（官方，月底更新）<br>
-          • <a href="https://finance.yahoo.com/quote/${code}.TW/holdings/" target="_blank" style="color:var(--blue-light)">Yahoo Finance ${code} 持股</a>
+          • <a href="https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid=${code}.TW" target="_blank" style="color:var(--blue-light)">MoneyDJ ${code} 持股</a><br>
+          • <a href="https://www.twse.com.tw/zh/ETF/etf.html" target="_blank" style="color:var(--blue-light)">TWSE ETF 專區</a>（官方）
         </div>
       </div>`;
     return;
   }
 
-  const th=data.topHoldings||{};
-  const holdings=th.holdings||[];
-  const stockPct=(th.stockPosition?.raw||0)*100;
-  const bondPct=(th.bondPosition?.raw||0)*100;
-  const cashPct=(th.cashPosition?.raw||0)*100;
-  const otherPct=(th.otherPosition?.raw||0)*100;
-
-  let allocHtml='';
-  if(stockPct||bondPct||cashPct){
-    allocHtml=`<div class="stats-grid" style="margin-bottom:14px;">
-      ${stockPct?`<div class="stat-card"><div class="label">股票佔比</div><div class="value">${fmt(stockPct)}%</div></div>`:''}
-      ${bondPct?`<div class="stat-card"><div class="label">債券佔比</div><div class="value">${fmt(bondPct)}%</div></div>`:''}
-      ${cashPct?`<div class="stat-card"><div class="label">現金佔比</div><div class="value">${fmt(cashPct)}%</div></div>`:''}
-      ${otherPct?`<div class="stat-card"><div class="label">其他佔比</div><div class="value">${fmt(otherPct)}%</div></div>`:''}
-    </div>`;
-  }
-
-  if(holdings.length===0){
-    el.innerHTML=`<div class="section"><h3>📦 持股明細</h3>${allocHtml}
-      <div class="info-note">ℹ️ Yahoo Finance 未提供此 ETF 個別持股資料。<a href="https://www.twse.com.tw/zh/ETF/etf.html" target="_blank" style="color:var(--blue-light)">前往 TWSE 查詢</a></div>
+  const {holdings, dataDate} = data;
+  
+  if(!holdings || holdings.length === 0){
+    el.innerHTML=`<div class="section"><h3>📦 持股明細</h3>
+      <div class="info-note">ℹ️ 該 ETF 暫無持股資料。<a href="https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid=${code}.TW" target="_blank" style="color:var(--blue-light)">前往 MoneyDJ 查詢</a></div>
     </div>`;
     return;
   }
 
-  const maxPct=Math.max(...holdings.map(h=>h.holdingPercent?.raw||0));
-  let rows='';
-  holdings.forEach((h,i)=>{
-    const pct=(h.holdingPercent?.raw||0)*100;
-    const barW=maxPct>0?Math.max(2,(pct/(maxPct*100))*80):2;
-    rows+=`<tr>
+  // 計算最大佔比（用於 bar）
+  const maxPct = Math.max(...holdings.map(h => h.pct));
+
+  let rows = '';
+  holdings.forEach((h, i) => {
+    const barW = maxPct > 0 ? Math.max(2, (h.pct / maxPct) * 80) : 2;
+    const changeClass = h.change.includes('+') ? 'up' : h.change.includes('-') ? 'down' : 'flat';
+    rows += `<tr>
       <td style="color:var(--muted);font-size:0.78rem;">${i+1}</td>
-      <td><strong>${h.symbol||'—'}</strong></td>
-      <td>${h.holdingName||'—'}</td>
-      <td><div class="bar-wrap"><div class="bar" style="width:${barW}px"></div><span class="pct-text">${fmt(pct)}%</span></div></td>
+      <td><strong>${h.name}</strong></td>
+      <td style="text-align:right;color:var(--muted);font-size:0.82rem;">${h.shares}</td>
+      <td><div class="bar-wrap"><div class="bar" style="width:${barW}px"></div><span class="pct-text">${h.pct}%</span></div></td>
+      <td class="${changeClass}" style="text-align:right;font-size:0.82rem;">${h.change}</td>
     </tr>`;
   });
 
-  el.innerHTML=`
+  el.innerHTML = `
     <div class="section">
-      <h3>📦 持股明細 <span class="badge">前 ${holdings.length} 大持股</span></h3>
-      ${allocHtml}
-      <div class="info-note">ℹ️ 資料來源：Yahoo Finance，月底更新。完整持股請至 <a href="https://www.twse.com.tw/zh/ETF/etf.html" target="_blank" style="color:var(--blue-light)">TWSE ETF 專區</a>。</div>
+      <h3>📦 持股明細 <span class="badge">${holdings.length} 檔</span></h3>
+      <div class="info-note">ℹ️ 資料來源：<a href="https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid=${code}.TW" target="_blank" style="color:var(--blue-light)">MoneyDJ</a> ｜ 資料日期：${dataDate || '未知'}</div>
       <div style="overflow-x:auto;">
         <table class="holdings-table">
-          <thead><tr><th>#</th><th>代號</th><th>名稱</th><th>佔比</th></tr></thead>
+          <thead><tr><th>#</th><th>股票名稱</th><th>持股（千股）</th><th>佔比</th><th>增減</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
