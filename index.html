@@ -147,9 +147,20 @@ async function searchETF(){
       fetchYahooQuote(code),
       fetchTWSEHistory(code)
     ]);
+    
+    // Debug log
+    console.log('[DEBUG] quote:', quote);
+    console.log('[DEBUG] history:', history);
+    console.log('[DEBUG] quote?.meta:', quote?.meta);
+    console.log('[DEBUG] history?.data?.length:', history?.data?.length);
+    
     // 只要任一來源有資料就顯示，不需要兩個都有
     const hasQuote = quote && quote.meta;
     const hasHistory = history && history.data && history.data.length > 0;
+    
+    console.log('[DEBUG] hasQuote:', hasQuote);
+    console.log('[DEBUG] hasHistory:', hasHistory);
+    
     if(!hasQuote && !hasHistory){
       main.innerHTML=`<div class="status-box"><div class="icon">❌</div><p>找不到代號 <strong>${code}</strong> 的 ETF</p><p style="font-size:0.8rem;margin-top:8px;">請確認代號是否正確，例如 0050、00878</p></div>`;
       return;
@@ -169,17 +180,26 @@ async function fetchYahooQuote(code){
   for(const suffix of['.TW','.TWO']){
     try{
       const url=`https://query1.finance.yahoo.com/v8/finance/chart/${code}${suffix}?interval=1d&range=5d&includePrePost=false`;
+      console.log('[DEBUG] fetchYahooQuote trying:', url);
       const r=await fetch(url,{headers:YF_HEADERS});
+      console.log('[DEBUG] fetchYahooQuote response status:', r.status);
       if(!r.ok)continue;
       const d=await r.json();
       const result=d?.chart?.result?.[0];
+      console.log('[DEBUG] fetchYahooQuote result:', result);
+      console.log('[DEBUG] fetchYahooQuote meta:', result?.meta);
+      console.log('[DEBUG] fetchYahooQuote price:', result?.meta?.regularMarketPrice);
       // 修正：用 != null 而非 truthy，避免價格為 0 時誤判
       if(result && result.meta && result.meta.regularMarketPrice != null){
         result._suffix=suffix;
+        console.log('[DEBUG] fetchYahooQuote SUCCESS, returning result');
         return result;
       }
-    }catch(e){}
+    }catch(e){
+      console.log('[DEBUG] fetchYahooQuote error:', e);
+    }
   }
+  console.log('[DEBUG] fetchYahooQuote FAILED, returning null');
   return null;
 }
 
