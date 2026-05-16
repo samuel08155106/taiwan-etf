@@ -365,7 +365,7 @@ async function renderAll(code,quote,history){
     :(history?.data?.[history.data.length-1]?.[0]||'');
 
   main.innerHTML=`
-    <div class="note">📡 股價：Yahoo Finance ｜ 歷史：TWSE ｜ 持股：MoneyDJ（每月更新）｜ 資料日期：${dataDate}</div>
+    <div class="note">📡 股價：Yahoo Finance（即時）｜ 歷史：TWSE（每日）｜ 持股：MoneyDJ（每月）｜ 資料日期：${dataDate}</div>
 
     <div class="etf-header">
       <div class="etf-title-row">
@@ -453,12 +453,20 @@ function renderHoldings(data,code){
   el.innerHTML = `
     <div class="section">
       <h3>📦 持股明細 <span class="badge">${holdings.length} 檔</span></h3>
-      <div class="info-note">ℹ️ 資料來源：${source} ｜ 資料日期：${dataDate || '未知'}</div>
+      <div class="info-note">
+        ℹ️ 資料來源：${source} ｜ 資料日期：${dataDate || '未知'}<br>
+        💡 <strong>說明：</strong>ETF 持股明細依法規為<strong>每月公告</strong>（非每日更新）。投信公司通常在每月月底公告上月持股。
+      </div>
       <div style="overflow-x:auto;">
         <table class="holdings-table">
           <thead><tr><th>#</th><th>股票名稱</th><th>持股（千股）</th><th>佔比</th><th>增減</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
+      </div>
+      <div class="info-note" style="margin-top:10px;">
+        📌 想查詢最新資料？<br>
+        • <a href="https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid=${code}.TW" target="_blank" style="color:var(--blue-light)">MoneyDJ ${code} 持股明細</a><br>
+        • <a href="https://www.twse.com.tw/zh/ETF/etf.html" target="_blank" style="color:var(--blue-light)">TWSE ETF 專區</a>（官方）
       </div>
     </div>`;
 }
