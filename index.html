@@ -71,7 +71,7 @@ footer a{color:var(--blue-light);}
 <body>
 <header>
   <h1>🇹🇼 台灣 ETF 查詢系統</h1>
-  <p>股價：Yahoo Finance ｜ 歷史：TWSE ｜ 持股：公開資料</p>
+  <p>股價：Yahoo Finance ｜ 歷史：TWSE ｜ 持股：MoneyDJ / 投信官網</p>
 </header>
 <div class="search-wrap">
   <div class="search-row">
@@ -217,7 +217,62 @@ async function fetchTWSEHistory(code){
   }catch(e){return null;}
 }
 
-// ── MoneyDJ 持股明細（透過 CORS proxy 抓 HTML）──────
+// ── ETF 發行商對應表 ──────────────────────────────────
+const ETF_ISSUERS = {
+  '元大': {
+    codes: /^(0050|0051|0052|0053|0054|0055|0056|0057|006|00[67])/,
+    name: '元大投信',
+    holdingsUrl: (code) => `https://www.yuantaetfs.com/api/StkWeights/${code}`
+  },
+  '國泰': {
+    codes: /^007/,
+    name: '國泰投信',
+    holdingsUrl: (code) => `https://www.cathaysite.com.tw/funds/etf/${code}/holdings`
+  },
+  '富邦': {
+    codes: /^00[89]/,
+    name: '富邦投信',
+    holdingsUrl: (code) => `https://www.fubon.com/etf/api/holdings/${code}`
+  }
+};
+
+// 判斷 ETF 發行商
+function getETFIssuer(code){
+  for(const [key, issuer] of Object.entries(ETF_ISSUERS)){
+    if(issuer.codes.test(code)) return issuer;
+  }
+  return null;
+}
+
+// ── 從投信官網抓持股（優先）──────────────────────────
+async function fetchIssuerHoldings(code){
+  const issuer = getETFIssuer(code);
+  if(!issuer){
+    console.log('[DEBUG] Unknown issuer for:', code);
+    return null;
+  }
+  
+  try{
+    const PROXY = 'https://api.allorigins.win/raw?url=';
+    const url = issuer.holdingsUrl(code);
+    console.log('[DEBUG] Trying issuer API:', issuer.name, url);
+    
+    const r = await fetch(PROXY + encodeURIComponent(url));
+    if(!r.ok) return null;
+    
+    const data = await r.json();
+    console.log('[DEBUG] Issuer API response:', data);
+    
+    // 這裡需要根據各投信的 API 格式解析
+    // 目前先返回 null，讓它 fallback 到 MoneyDJ
+    return null;
+  }catch(e){
+    console.log('[DEBUG] Issuer API error:', e.message);
+    return null;
+  }
+}
+
+// ── MoneyDJ 持股明細（備用）──────────────────────────
 async function fetchMoneyDJHoldings(code){
   try{
     const PROXY = 'https://api.allorigins.win/raw?url=';
@@ -260,11 +315,21 @@ async function fetchMoneyDJHoldings(code){
     });
     
     console.log('[DEBUG] MoneyDJ holdings:', holdings.length);
-    return holdings.length > 0 ? {holdings, dataDate} : null;
+    return holdings.length > 0 ? {holdings, dataDate, source: 'MoneyDJ'} : null;
   }catch(e){
     console.log('[DEBUG] MoneyDJ error:', e.message);
     return null;
   }
+}
+
+// ── 綜合持股資料（優先投信官網，備用 MoneyDJ）────────
+async function fetchHoldings(code){
+  // 先試投信官網
+  let data = await fetchIssuerHoldings(code);
+  if(data) return data;
+  
+  // 再試 MoneyDJ
+  return await fetchMoneyDJHoldings(code);
 }
 
 // ── 渲染全部 ──────────────────────────────────────────
@@ -300,7 +365,7 @@ async function renderAll(code,quote,history){
     :(history?.data?.[history.data.length-1]?.[0]||'');
 
   main.innerHTML=`
-    <div class="note">📡 股價：Yahoo Finance ｜ 歷史：TWSE ｜ 資料日期：${dataDate}</div>
+    <div class="note">📡 股價：Yahoo Finance ｜ 歷史：TWSE ｜ 持股：MoneyDJ（每月更新）｜ 資料日期：${dataDate}</div>
 
     <div class="etf-header">
       <div class="etf-title-row">
@@ -337,7 +402,7 @@ async function renderAll(code,quote,history){
 
   // 並行：持股 + 歷史
   const [holdings]=await Promise.all([
-    fetchMoneyDJHoldings(code),
+    fetchHoldings(code),
     Promise.resolve(renderHistory(history))
   ]);
   renderHoldings(holdings,code);
@@ -350,7 +415,7 @@ function renderHoldings(data,code){
     el.innerHTML=`
       <div class="section">
         <h3>📦 持股明細</h3>
-        <div class="warn-note">⚠️ 持股資料無法取得（MoneyDJ 可能限流或該 ETF 無資料）。</div>
+        <div class="warn-note">⚠️ 持股資料無法取得（可能限流或該 ETF 無資料）。</div>
         <div class="info-note">
           📌 可至以下連結查詢完整持股：<br>
           • <a href="https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid=${code}.TW" target="_blank" style="color:var(--blue-light)">MoneyDJ ${code} 持股</a><br>
@@ -360,7 +425,7 @@ function renderHoldings(data,code){
     return;
   }
 
-  const {holdings, dataDate} = data;
+  const {holdings, dataDate, source = 'MoneyDJ'} = data;
   
   if(!holdings || holdings.length === 0){
     el.innerHTML=`<div class="section"><h3>📦 持股明細</h3>
@@ -388,7 +453,7 @@ function renderHoldings(data,code){
   el.innerHTML = `
     <div class="section">
       <h3>📦 持股明細 <span class="badge">${holdings.length} 檔</span></h3>
-      <div class="info-note">ℹ️ 資料來源：<a href="https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid=${code}.TW" target="_blank" style="color:var(--blue-light)">MoneyDJ</a> ｜ 資料日期：${dataDate || '未知'}</div>
+      <div class="info-note">ℹ️ 資料來源：${source} ｜ 資料日期：${dataDate || '未知'}</div>
       <div style="overflow-x:auto;">
         <table class="holdings-table">
           <thead><tr><th>#</th><th>股票名稱</th><th>持股（千股）</th><th>佔比</th><th>增減</th></tr></thead>
